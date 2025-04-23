@@ -69,6 +69,7 @@ bevy = { version = "0.15", default-features = false, features = [
     "sysinfo_plugin",
     "tonemapping_luts",
     "webgl2",
+    "webgpu",
     "x11",
 ] }
 bevy_kira_audio = { version = "0.22.0", features = ["android_shared_stdcxx"] }
