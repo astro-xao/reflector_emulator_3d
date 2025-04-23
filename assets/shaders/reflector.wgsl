@@ -5,7 +5,7 @@
     // forward_io::VertexOutput,
 }
 
-@group(2) @binding(0) var<storage, read> buffer: array<f32, 3880>;
+@group(2) @binding(0) var<storage, read> buffer: array<f32, 7680>;
 @group(2) @binding(1) var<uniform> enable_boundary: u32;
 @group(2) @binding(2) var<uniform> interpolate_algo: u32;
 
