@@ -38,8 +38,12 @@ fn main() {
     let mut builder = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "QTT 110 米 主反射面 3D 模拟器".to_string(),
-            resolution: WindowResolution::new(800., 600.),
-            ..default()
+            // Bind to canvas included in `index.html`
+            canvas: Some("#bevy".to_owned()),
+            fit_canvas_to_parent: true,
+            // Tells wasm not to override default event handling, like F5 and Ctrl+R
+            prevent_default_event_handling: false,
+            ..default()    
         }),
         ..default()
     });
