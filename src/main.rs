@@ -1099,7 +1099,7 @@ fn update(
     let buffer = buffers.get_mut(&material.buffer).unwrap();
     let t = time.elapsed_secs() * speed.0;
     buffer.set_data(
-        (0..3880)
+        (0..7680)
             .map(|i| match data_fn.get() {
                 MockingDataFn::Mock1 => mock1(t, i),
                 MockingDataFn::Mock2 => mock2(t, i),
