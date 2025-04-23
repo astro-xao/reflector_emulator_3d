@@ -1,10 +1,14 @@
 // disable console on windows for release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use bevy::asset::AssetMetaCheck;
+use bevy::app::TerminalCtrlCHandlerPlugin;
+use bevy::diagnostic::DiagnosticsPlugin;
+use bevy::gizmos::GizmoPlugin;
+use bevy::render::RenderPlugin;
 use bevy::window::PrimaryWindow;
 use bevy::winit::WinitWindows;
 use bevy::DefaultPlugins;
+use bevy::{render::settings::Backends, render::settings::WgpuSettings};
 use std::io::Cursor;
 use winit::window::Icon;
 
@@ -24,7 +28,7 @@ use bevy::{
     math::vec3,
     prelude::*,
     render::{
-        camera::{self, Exposure, PhysicalCameraParameters},
+        camera::{Exposure, PhysicalCameraParameters},
         mesh::{Indices, PrimitiveTopology},
         render_asset::RenderAssetUsages,
         render_resource::{AsBindGroup, ShaderRef},
@@ -37,27 +41,40 @@ use bevy::{
 fn main() {
     let mut app = App::new();
 
+    let mut builder = DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "QTT 110 米 主反射面 3D 模拟器".to_string(),
+            resolution: WindowResolution::new(800., 600.),
+            ..default()
+        }),
+        ..default()
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        builder = builder.set(RenderPlugin {
+            render_creation: WgpuSettings {
+                backends: Some(Backends::BROWSER_WEBGPU),
+                ..default()
+            }
+            .into(),
+            ..default()
+        });
+    }
+
+    // 在 Release 模式下禁用日志订阅
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder
+            .disable::<bevy::log::LogPlugin>()
+            .disable::<DiagnosticsPlugin>()
+            .disable::<TerminalCtrlCHandlerPlugin>()
+            .disable::<GizmoPlugin>();
+    }
+
+    app.add_plugins(builder);
+
     app.insert_resource(ClearColor(Color::linear_rgb(0.4, 0.4, 0.4)))
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "QTT 110 米 主反射面 3D 模拟器".to_string(),
-                        resolution: WindowResolution::new(800., 600.),
-                        // Bind to canvas included in `index.html`
-                        canvas: Some("#bevy".to_owned()),
-                        fit_canvas_to_parent: true,
-                        // Tells wasm not to override default event handling, like F5 and Ctrl+R
-                        prevent_default_event_handling: false,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    meta_check: AssetMetaCheck::Never,
-                    ..default()
-                }),
-        )
         .add_systems(Startup, set_window_icon);
 
     app.add_plugins(MaterialPlugin::<CustomMaterial>::default())
