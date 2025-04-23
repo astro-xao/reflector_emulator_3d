@@ -1,10 +1,8 @@
 // disable console on windows for release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use bevy::render::RenderPlugin;
 use bevy::window::PrimaryWindow;
 use bevy::winit::WinitWindows;
 use bevy::DefaultPlugins;
-use bevy::{render::settings::Backends, render::settings::WgpuSettings};
 use std::io::Cursor;
 use winit::window::Icon;
 
@@ -45,18 +43,6 @@ fn main() {
         }),
         ..default()
     });
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        builder = builder.set(RenderPlugin {
-            render_creation: WgpuSettings {
-                backends: Some(Backends::BROWSER_WEBGPU),
-                ..default()
-            }
-            .into(),
-            ..default()
-        });
-    }
 
     app.add_plugins(builder);
 
