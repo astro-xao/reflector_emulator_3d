@@ -1,9 +1,5 @@
 // disable console on windows for release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-use bevy::app::TerminalCtrlCHandlerPlugin;
-use bevy::diagnostic::DiagnosticsPlugin;
-use bevy::gizmos::GizmoPlugin;
 use bevy::render::RenderPlugin;
 use bevy::window::PrimaryWindow;
 use bevy::winit::WinitWindows;
@@ -60,16 +56,6 @@ fn main() {
             .into(),
             ..default()
         });
-    }
-
-    // 在 Release 模式下禁用日志订阅
-    #[cfg(not(debug_assertions))]
-    {
-        builder = builder
-            .disable::<bevy::log::LogPlugin>()
-            .disable::<DiagnosticsPlugin>()
-            .disable::<TerminalCtrlCHandlerPlugin>()
-            .disable::<GizmoPlugin>();
     }
 
     app.add_plugins(builder);
