@@ -50,15 +50,15 @@ fn main() {
 
     app.add_plugins(builder);
 
-    app.insert_resource(ClearColor(Color::linear_rgb(0.4, 0.4, 0.4)))
+    app.insert_resource(ClearColor(Color::BLACK))
         .add_systems(Startup, set_window_icon);
 
     app.add_plugins(MaterialPlugin::<CustomMaterial>::default())
         .add_plugins(CameraControllerPlugin)
         .insert_resource(Parameters(PhysicalCameraParameters {
-            aperture_f_stops: 1.0,
+            aperture_f_stops: 32.0,
             shutter_speed_s: 1.0 / 125.0,
-            sensitivity_iso: 1000.0,
+            sensitivity_iso: 500.0,
             sensor_height: 0.01866,
         }))
         .init_state::<MockingDataFn>()
@@ -239,7 +239,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
 ) {
     // 加载自定义字体
-    let font = asset_server.load("fonts/SIMYOU.TTF");
+    let font = asset_server.load("fonts/FangZhenHeiTi.ttf");
     let custom_font = CustomTextFont(font.clone());
     commands.insert_resource(custom_font);
 
@@ -256,28 +256,15 @@ fn setup(
     // Light
     commands.spawn(DirectionalLight::default());
 
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.03).mesh())),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: RED.into(),
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        })),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
-    ));
-
     // add plane
     commands.spawn((
         Mesh3d(
             meshes.add(
-                Plane3d::default()
-                    .mesh()
-                    .size(100.0, 100.0)
-                    .subdivisions(10),
+                Plane3d::new(Vec3::Y, Vec2::splat(100.0)),
             ),
         ),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: SILVER.into(),
+            base_color: BLUE_500.into(),
             alpha_mode: AlphaMode::Blend,
             cull_mode: None,
             ..default()
@@ -903,7 +890,7 @@ fn setup_instruction(
     parameters: Res<Parameters>,
     asset_server: Res<AssetServer>,
 ) {
-    let font = asset_server.load("fonts/SIMYOU.TTF");
+    let font = asset_server.load("fonts/FangZhenHeiTi.ttf");
     let custom_font = CustomTextFont(font.clone());
     commands.insert_resource(custom_font);
 
