@@ -1,8 +1,9 @@
 // disable console on windows for release builds
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use bevy::window::PrimaryWindow;
+use bevy::render::render_resource::VertexFormat;
 use bevy::winit::WinitWindows;
 use bevy::DefaultPlugins;
+use bevy::{render::mesh::MeshVertexAttribute, window::PrimaryWindow};
 use std::io::Cursor;
 use winit::window::Icon;
 
@@ -43,7 +44,7 @@ fn main() {
             fit_canvas_to_parent: true,
             // Tells wasm not to override default event handling, like F5 and Ctrl+R
             prevent_default_event_handling: false,
-            ..default()    
+            ..default()
         }),
         ..default()
     });
@@ -65,7 +66,8 @@ fn main() {
         .init_state::<MockingState>()
         .init_state::<MockingInterpolateAlgo>()
         .init_state::<BoundaryRender>()
-        .insert_resource(MockingSpeed(2.5))
+        .init_state::<ReferencePlaneRender>()
+        .insert_resource(MockingSpeed(0.5))
         .add_systems(
             Startup,
             (setup, setup_instruction, setup_control_ui).chain(),
@@ -114,11 +116,16 @@ const CAMERA_INITIAL_POSITION: Vec3 = vec3(0.0, 18.0, 0.0);
 /// The initial position of the camera.
 const CAMERA_INITIAL_POSITION_Z: Vec3 = vec3(0.0, 0.0, 25.0);
 
+const CAMERA_INITIAL_POSITION_INIT: Vec3 = vec3(15.0, 0.0, 5.0);
+
 #[derive(Resource, Default, Deref, DerefMut)]
 struct Parameters(PhysicalCameraParameters);
 
 #[derive(Component)]
 struct Block;
+
+#[derive(Component)]
+struct ReferencePlane;
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash, States)]
 enum MockingState {
@@ -132,15 +139,17 @@ enum MockingDataFn {
     #[default]
     Mock1 = 1,
     Mock2 = 2,
-    Networking = 3,
+    Mock3 = 3,
+    Mock4 = 4,
 }
 
 impl fmt::Display for MockingDataFn {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            MockingDataFn::Mock1 => write!(f, "刚性面"),
-            MockingDataFn::Mock2 => write!(f, "柔性面"),
-            MockingDataFn::Networking => write!(f, "Networking"),
+            MockingDataFn::Mock1 => write!(f, "模拟 1"),
+            MockingDataFn::Mock2 => write!(f, "模拟 2"),
+            MockingDataFn::Mock3 => write!(f, "模拟 3"),
+            MockingDataFn::Mock4 => write!(f, "模拟 4"),
         }
     }
 }
@@ -155,6 +164,8 @@ enum MockingInterpolateAlgo {
     #[default]
     Interpolate_Normal = 2,
     Interpolate_Oklab = 3,
+    Interpolate_Heat5 = 4,
+    Interpolate_Heat7 = 5,
 }
 
 impl fmt::Display for MockingInterpolateAlgo {
@@ -164,6 +175,8 @@ impl fmt::Display for MockingInterpolateAlgo {
             MockingInterpolateAlgo::Interpolate_1 => write!(f, "algo_1"),
             MockingInterpolateAlgo::Interpolate_Normal => write!(f, "algo_normal"),
             MockingInterpolateAlgo::Interpolate_Oklab => write!(f, "algo_oklab"),
+            MockingInterpolateAlgo::Interpolate_Heat5 => write!(f, "algo_heat5"),
+            MockingInterpolateAlgo::Interpolate_Heat7 => write!(f, "algo_heat7"),
         }
     }
 }
@@ -183,6 +196,25 @@ impl fmt::Display for BoundaryRender {
         }
     }
 }
+
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash, States)]
+enum ReferencePlaneRender {
+    #[default]
+    Disable = 0,
+    Enable = 1,
+}
+
+impl fmt::Display for ReferencePlaneRender {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReferencePlaneRender::Disable => write!(f, "隐藏"),
+            ReferencePlaneRender::Enable => write!(f, "启用"),
+        }
+    }
+}
+
+const ATTRIBUTE_POSITION_INDEX: MeshVertexAttribute =
+    MeshVertexAttribute::new("PositionIndex", 988540917, VertexFormat::Uint32);
 
 // Holds a handle to the custom material
 #[derive(Resource)]
@@ -219,11 +251,18 @@ impl Material for CustomMaterial {
     fn specialize(
         _pipeline: &bevy::pbr::MaterialPipeline<Self>,
         descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-        _layout: &bevy::render::mesh::MeshVertexBufferLayoutRef,
+        layout: &bevy::render::mesh::MeshVertexBufferLayoutRef,
         _key: bevy::pbr::MaterialPipelineKey<Self>,
     ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
         // 禁用背面剔除
         descriptor.primitive.cull_mode = None;
+
+        let vertex_layout = layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+            ATTRIBUTE_POSITION_INDEX.at_shader_location(2),
+        ])?;
+        descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
     }
 }
@@ -235,6 +274,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     boundary_render: Res<State<BoundaryRender>>,
+    reference_plane_render: Res<State<ReferencePlaneRender>>,
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -250,7 +290,7 @@ fn setup(
             enabled: false,
             ..default()
         },
-        Transform::from_translation(CAMERA_INITIAL_POSITION).looking_at(Vec3::ZERO, Vec3::Z),
+        Transform::from_translation(CAMERA_INITIAL_POSITION_INIT).looking_at(Vec3::ZERO, Vec3::Z),
     ));
 
     // Light
@@ -258,11 +298,12 @@ fn setup(
 
     // add plane
     commands.spawn((
-        Mesh3d(
-            meshes.add(
-                Plane3d::new(Vec3::Y, Vec2::splat(100.0)),
-            ),
-        ),
+        ReferencePlane,
+        match reference_plane_render.get() {
+            ReferencePlaneRender::Enable => Visibility::Visible,
+            ReferencePlaneRender::Disable => Visibility::Hidden,
+        },
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(100.0)))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: BLUE_500.into(),
             alpha_mode: AlphaMode::Blend,
@@ -378,6 +419,7 @@ enum ButtonID {
     SwitchMockingFn,
     SwitchMockingBoundary,
     SwitchHelp,
+    SwitchReferencePlaneRender,
     SwitchSpeedDecrease,
     SwitchSpeedIncrease,
     SwitchSpeedReset,
@@ -386,6 +428,7 @@ enum ButtonID {
     SwitchCameraRight,
     SwitchCameraUp,
     SwitchCameraDown,
+    SwitchCameraResetInit,
     SwitchCameraResetZ,
     SwitchCameraResetY,
 }
@@ -397,6 +440,8 @@ fn setup_control_ui(
     mut commands: Commands,
     custom_font_handle: Res<CustomTextFont>,
     camera_control: Single<&CameraController>,
+    reference_plane_render: Res<State<ReferencePlaneRender>>,
+    speed: Res<MockingSpeed>,
 ) {
     let text_font = TextFont {
         font: (&custom_font_handle.0).clone(),
@@ -482,7 +527,7 @@ fn setup_control_ui(
                     get_switch_speed_fn(ButtonID::SwitchSpeedDecrease),
                 );
                 p1.spawn((
-                    Text::new("2.0"),
+                    Text::new(format!("{:.4}", speed.0)),
                     SpeedText,
                     TextFont {
                         font_size: 20.0,
@@ -521,6 +566,14 @@ fn setup_control_ui(
                 text_font.clone(),
                 ButtonID::SwitchHelp,
                 on_switch_camera_control_clicked,
+            );
+
+            spawn_button(
+                p,
+                format!("参考面: {}", reference_plane_render.get()).as_str(),
+                text_font.clone(),
+                ButtonID::SwitchReferencePlaneRender,
+                on_switch_reference_plane_render_clicked,
             );
 
             // 添加相机转动控制
@@ -569,14 +622,21 @@ fn setup_control_ui(
                 );
                 spawn_button(
                     p1,
-                    "重置(Z)",
+                    "初始视角",
+                    text_font.clone(),
+                    ButtonID::SwitchSpeedReset,
+                    get_switch_camera_orientation_fn(ButtonID::SwitchCameraResetInit),
+                );
+                spawn_button(
+                    p1,
+                    "Z-UP",
                     text_font.clone(),
                     ButtonID::SwitchSpeedReset,
                     get_switch_camera_orientation_fn(ButtonID::SwitchCameraResetZ),
                 );
                 spawn_button(
                     p1,
-                    "重置(Y)",
+                    "Y-UP",
                     text_font.clone(),
                     ButtonID::SwitchSpeedReset,
                     get_switch_camera_orientation_fn(ButtonID::SwitchCameraResetY),
@@ -667,16 +727,22 @@ fn on_switch_mocking_fn_clicked(
 ) {
     if let Ok(children) = query.get(trigger.entity()) {
         if let Ok(mut text) = text_query.get_mut(children[0]) {
-            *text = Text::new(format!("Shader 函数: {}", data_fn.get()));
             match data_fn.get() {
                 MockingDataFn::Mock1 => {
                     next_data_fn.set(MockingDataFn::Mock2);
+                    *text = Text::new(format!("Shader 函数: {}", MockingDataFn::Mock2));
                 }
                 MockingDataFn::Mock2 => {
-                    next_data_fn.set(MockingDataFn::Networking);
+                    next_data_fn.set(MockingDataFn::Mock3);
+                    *text = Text::new(format!("Shader 函数: {}", MockingDataFn::Mock3));
                 }
-                MockingDataFn::Networking => {
+                MockingDataFn::Mock3 => {
+                    next_data_fn.set(MockingDataFn::Mock4);
+                    *text = Text::new(format!("Shader 函数: {}", MockingDataFn::Mock4));
+                }
+                MockingDataFn::Mock4 => {
                     next_data_fn.set(MockingDataFn::Mock1);
+                    *text = Text::new(format!("Shader 函数: {}", MockingDataFn::Mock1));
                 }
             }
         }
@@ -735,6 +801,16 @@ fn on_switch_mocking_interpolate_algo_clicked(
                     custom_material.interpolate_algo = 3;
                 }
                 MockingInterpolateAlgo::Interpolate_Oklab => {
+                    *text = Text::new("颜色算法: Interpolate_Heat5");
+                    next_mocking_algo.set(MockingInterpolateAlgo::Interpolate_Heat5);
+                    custom_material.interpolate_algo = 4;
+                }
+                MockingInterpolateAlgo::Interpolate_Heat5 => {
+                    *text = Text::new("颜色算法: Interpolate_Heat7");
+                    next_mocking_algo.set(MockingInterpolateAlgo::Interpolate_Heat7);
+                    custom_material.interpolate_algo = 5;
+                }
+                MockingInterpolateAlgo::Interpolate_Heat7 => {
                     *text = Text::new("颜色算法: Interpolate_0");
                     next_mocking_algo.set(MockingInterpolateAlgo::Interpolate_0);
                     custom_material.interpolate_algo = 0;
@@ -767,6 +843,36 @@ fn on_switch_boundary_clicked(
                     *text = Text::new("块边界: 启用");
                     next_boundary_state.set(BoundaryRender::Enable);
                     custom_material.enable_boundary_render = 1;
+                }
+            }
+        }
+    }
+}
+
+fn on_switch_reference_plane_render_clicked(
+    trigger: Trigger<Pointer<Down>>,
+    reference_plane_state: Res<State<ReferencePlaneRender>>,
+    mut next_reference_plane: ResMut<NextState<ReferencePlaneRender>>,
+    query: Query<&Children>,
+    mut text_query: Query<&mut Text>,
+    mut reference_plane_query: Query<&mut Visibility, With<ReferencePlane>>,
+) {
+    if let Ok(children) = query.get(trigger.entity()) {
+        if let Ok(mut text) = text_query.get_mut(children[0]) {
+            match *reference_plane_state.get() {
+                ReferencePlaneRender::Enable => {
+                    *text = Text::new("参考面: 隐藏");
+                    next_reference_plane.set(ReferencePlaneRender::Disable);
+                    reference_plane_query.iter_mut().for_each(|mut visibility| {
+                        *visibility = Visibility::Hidden;
+                    });
+                }
+                ReferencePlaneRender::Disable => {
+                    *text = Text::new("参考面: 启用");
+                    next_reference_plane.set(ReferencePlaneRender::Enable);
+                    reference_plane_query.iter_mut().for_each(|mut visibility| {
+                        *visibility = Visibility::Visible;
+                    });
                 }
             }
         }
@@ -827,18 +933,18 @@ fn get_switch_speed_fn(
         if let Ok(children) = query.get(trigger.entity()) {
             match typ {
                 ButtonID::SwitchSpeedDecrease => {
-                    speed.0 -= 0.5;
+                    speed.0 *= 0.75;
                 }
                 ButtonID::SwitchSpeedIncrease => {
-                    speed.0 += 0.5;
+                    speed.0 *= 1.5;
                 }
                 ButtonID::SwitchSpeedReset => {
-                    speed.0 = 2.5;
+                    speed.0 = 1.0;
                 }
                 _ => {}
             };
             let mut text = text_query.single_mut();
-            *text = Text::new(format!("{:.1}", speed.0));
+            *text = Text::new(format!("{:.4}", speed.0));
         }
     }
 }
@@ -872,6 +978,11 @@ fn get_switch_camera_orientation_fn(
             ButtonID::SwitchCameraResetY => {
                 // Reset camera position
                 camera.translation = CAMERA_INITIAL_POSITION_Z;
+                camera.look_at(Vec3::ZERO, Vec3::Z);
+            }
+            ButtonID::SwitchCameraResetInit => {
+                // Reset camera position
+                camera.translation = CAMERA_INITIAL_POSITION_INIT;
                 camera.look_at(Vec3::ZERO, Vec3::Z);
             }
             _ => {}
@@ -1062,6 +1173,10 @@ fn create_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normal)
     .with_inserted_indices(Indices::U32(indices))
+    .with_inserted_attribute(
+        ATTRIBUTE_POSITION_INDEX,
+        (0..positions.len() as u32).collect::<Vec<u32>>(),
+    )
 }
 
 fn toggle_text_visibility(mut query: Query<&mut Visibility, With<InstructionText>>) {
@@ -1086,13 +1201,15 @@ fn update(
     let buffer = buffers.get_mut(&material.buffer).unwrap();
     let t = time.elapsed_secs() * speed.0;
     buffer.set_data(
-        (0..7680)
-            .map(|i| match data_fn.get() {
-                MockingDataFn::Mock1 => mock1(t, i),
-                MockingDataFn::Mock2 => mock2(t, i),
-                MockingDataFn::Networking => mock1(t, i), // TODO: replace with networking data
-            })
-            .collect::<Vec<f32>>(),
+        (match data_fn.get() {
+            MockingDataFn::Mock1 => (0..object::vertices.len() as i32)
+                .map(|i| mock1(t, i))
+                .collect::<Vec<f32>>(),
+            MockingDataFn::Mock2 => mock5(t),
+            MockingDataFn::Mock3 => mock3(t),
+            MockingDataFn::Mock4 => mock4(t),
+        })
+        .as_slice(),
     );
 }
 
@@ -1125,16 +1242,16 @@ fn mock1(t: f32, i: i32) -> f32 {
     let v = ops::sin(t + i as f32) * 0.5 + 0.5;
     match i % 4 {
         0 => v - 0.5,
-        1 => v - 0.3,
-        2 => v - 0.4,
-        _ => v,
+        1 => v - 0.4,
+        2 => v - 0.3,
+        _ => v - 0.2,
     }
 }
 
 fn mock2(t: f32, i: i32) -> f32 {
     let v1 = ops::sin(t + i as f32);
-    let v2 = ops::sin(-t + i as f32 + 2.0);
-    let v3 = ops::cos(t + i as f32 + 4.0);
+    let v2 = v1 * 0.9 + 0.1 * ops::sin(-t + i as f32 + 2.0);
+    let v3 = v1 * 0.8 + 0.2 * ops::cos(t + i as f32 + 4.0);
     let v = (v1 + v2 + v3) / 3.0;
     match i % 4 {
         0 => v1,
@@ -1142,4 +1259,70 @@ fn mock2(t: f32, i: i32) -> f32 {
         2 => v3,
         _ => v,
     }
+}
+
+fn mock3(t: f32) -> Vec<f32> {
+    let mut result = [0.0; object::vertices.len()];
+    let mut index = 0;
+    let step = std::f32::consts::TAU / object::dounat_blocks.len() as f32;
+    for (i, &block) in object::dounat_blocks.iter().enumerate() {
+        for j in 0..block {
+            let low_h =
+                (ops::sin(t + i as f32 * step + (j as f32) * std::f32::consts::TAU / block as f32)
+                    + 1.0)
+                    * 0.5;
+            let high_h = (ops::sin(
+                t + (i as f32 + 1.0) * step + (j as f32) * std::f32::consts::TAU / block as f32,
+            ) + 1.0)
+                * 0.5;
+            result[index] = low_h;
+            result[index + 1] = low_h;
+            result[index + 2] = high_h;
+            result[index + 3] = high_h;
+            index += 4;
+        }
+    }
+    return result.to_vec();
+}
+
+fn mock5(t: f32) -> Vec<f32> {
+    let mut result = [0.0; object::vertices.len()];
+    let mut index = 0;
+    let step = std::f32::consts::TAU / object::dounat_blocks.len() as f32;
+    for (i, &block) in object::dounat_blocks.iter().enumerate() {
+        for j in 0..block {
+            let low_h = (ops::sin(t + i as f32 * step) + 1.0) * 0.5;
+            let high_h = (ops::sin(t + (i as f32 + 1.0) * step) + 1.0) * 0.5;
+            result[index] = low_h;
+            result[index + 1] = low_h;
+            result[index + 2] = high_h;
+            result[index + 3] = high_h;
+            index += 4;
+        }
+    }
+    return result.to_vec();
+}
+fn mock4(t: f32) -> Vec<f32> {
+    let mut result = [0.0; object::vertices.len()];
+    let mut index = 0;
+    let step = std::f32::consts::TAU / object::dounat_blocks.len() as f32;
+    for (i, &block) in object::dounat_blocks.iter().enumerate() {
+        let t0 = if i % 2 == 0 { t } else { -t };
+        for j in 0..block {
+            let low_h = (ops::sin(
+                t0 + i as f32 * step + (j as f32) * std::f32::consts::TAU / block as f32,
+            ) + 1.0)
+                * 0.5;
+            let high_h = (ops::sin(
+                t0 + (i as f32 + 1.0) * step + (j as f32) * std::f32::consts::TAU / block as f32,
+            ) + 1.0)
+                * 0.5;
+            result[index] = low_h;
+            result[index + 1] = low_h;
+            result[index + 2] = high_h;
+            result[index + 3] = high_h;
+            index += 4;
+        }
+    }
+    return result.to_vec();
 }
