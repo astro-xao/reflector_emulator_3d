@@ -1,6 +1,6 @@
 [package]
 name = "reflector_emulator_3d" # ToDo
-version = "0.1.0"
+version = "0.1.2"
 publish = false
 authors = ["Huxulm <huxulm@gmail.com>"] # ToDo: you are the author ;)
 edition = "2021"

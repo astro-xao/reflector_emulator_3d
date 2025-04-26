@@ -4,7 +4,7 @@
         Name="ReflectorEmulator3d"
         Manufacturer="ReflectorEmulator3d"
         UpgradeCode="e3b0c442-98fc-4f8e-a535-93dfd0597731"
-        Version="0.1.0"
+        Version="0.1.2"
 
         Scope="perUserOrMachine">
         <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
