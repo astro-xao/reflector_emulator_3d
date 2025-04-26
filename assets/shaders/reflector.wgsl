@@ -5,7 +5,7 @@
     // forward_io::VertexOutput,
 }
 
-@group(2) @binding(0) var<storage, read> buffer: array<f32, 7680>;
+@group(2) @binding(0) var<storage, read> buffer: array<f32, 9216>;
 @group(2) @binding(1) var<uniform> enable_boundary: u32;
 @group(2) @binding(2) var<uniform> interpolate_algo: u32;
 
@@ -15,7 +15,8 @@ struct VertexInput {
 
     // The world-space position of the vertex.
     @location(0) position: vec3<f32>,
-    @location(2) uv: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) position_index: u32,
 };
 
 struct VertexOutput {
@@ -75,6 +76,25 @@ var<private> scale_1 = array<vec4<f32>, 11>(
         vec4<f32>(1.0, 0.79, 0.94, 1.0),
         vec4<f32>(1.0, 0.87, 0.99, 1.0),
     );
+
+var<private> scale_2 = array<vec4<f32>, 10>(
+        vec4f(1f, 1f, 1f, 1f),
+        vec4f(1f, 0f, 0f, 1f),
+        vec4f(1f, 0.69f, 0f, 1f),
+        vec4f(1f, 1f, 0f, 1f),
+        vec4f(0f, 0.57f, 0f, 1f),
+        vec4f(0f, 0.96f, 0f, 1f),
+        vec4f(0.37f, 0.65f, 0.93f, 1f),
+        vec4f(0f, 0f, 0.78f, 1f),
+        vec4f(0.47f, 0f, 0.61f, 1f),
+        vec4f(0.2f, 0.2f, 0.2f, 1f),
+    );
+
+fn interpolate_scale_2(i_height: f32) -> vec4<f32> {
+    var h = i_height * 10.0;
+    var low_index: u32 = u32(floor(h));
+    return scale_2[low_index];
+}
 
 fn interpolate_color_0(i_height: f32) -> vec4<f32> {
     var h = i_height * 10.0;
@@ -159,6 +179,47 @@ fn oklab_to_linear_srgb(c: vec3<f32>) -> vec3<f32> {
     );
 }
 
+
+fn fromRedToGreen(interpolant: f32) -> vec3<f32> {
+    if (interpolant < 0.5) {
+        return vec3<f32>(1.0, 2.0 * interpolant, 0.0);
+    } else {
+        return vec3<f32>(2.0 - 2.0 * interpolant, 1.0, 0.0);
+    }
+}
+
+
+fn fromGreenToBlue(interpolant: f32) -> vec3<f32> {
+    if interpolant < 0.5 {
+        return vec3<f32>(0.0, 1.0, 2.0 * interpolant);
+    } else {
+        return vec3<f32>(0.0, 2.0 - 2.0 * interpolant, 1.0);
+    }
+}
+fn heat5(interpolant: f32) -> vec3<f32> {
+    let inverted_interpolant = interpolant;
+    if inverted_interpolant < 0.5 {
+        let remapped_first_half = 1.0 - 2.0 * inverted_interpolant;
+        return fromGreenToBlue(remapped_first_half);
+    } else {
+        let remapped_second_half = 2.0 - 2.0 * inverted_interpolant;
+        return fromRedToGreen(remapped_second_half);
+    }
+}
+
+fn heat7(interpolant: f32) -> vec3<f32> {
+    if interpolant < 1.0 / 6.0 {
+        let first_segment_interpolant = 6.0 * interpolant;
+        return (1.0 - first_segment_interpolant) * vec3<f32>(0.0, 0.0, 0.0) + first_segment_interpolant * vec3<f32>(0.0, 0.0, 1.0);
+    } else if interpolant < 5.0 / 6.0 {
+        let mid_interpolant = 0.25 * (6.0 * interpolant - 1.0);
+        return heat5(mid_interpolant);
+    } else {
+        let last_segment_interpolant = 6.0 * interpolant - 5.0;
+        return (1.0 - last_segment_interpolant) * vec3<f32>(1.0, 0.0, 0.0) + last_segment_interpolant * vec3<f32>(1.0, 1.0, 1.0);
+    }
+}
+
 @vertex
 fn vertex(vertex: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -166,11 +227,11 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
         get_world_from_local(vertex.instance_index), 
         vec4<f32>(vertex.position, 1.0)
     );
-
+    out.uv = vertex.uv;
     // 使用 i_height 在 red green 中混合
     let red = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     let green = vec4<f32>(0.0, 1.0, 0.0, 1.0);
-    let height = buffer[vertex.vertex_index % 3880];
+    let height = buffer[vertex.position_index % 9216u];
     out.i_height = height;
     if (interpolate_algo == 0u) {
         out.color = interpolate_color_0(height);
@@ -180,18 +241,24 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
         out.color = interpolate_color(height);
     } else if (interpolate_algo == 3u) {
         out.color = interpolate_color_oklab(height);
+    } else if (interpolate_algo == 4u) {
+        out.color = vec4f(heat5(height), 1.0);
+    } else if (interpolate_algo == 5u) {
+        out.color = vec4f(heat7(height), 1.0);
+    } else {
+        out.color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
-    
-    out.uv = vertex.uv;
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+
     // 通过 uv 值判断当前片元是否属于边缘，如果是则渲染 border 为黑色
     if (enable_boundary == 1u && (in.uv.x <= 0.015 || in.uv.y <= 0.015 || in.uv.x >= 0.985 || in.uv.y >= 0.985)) {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
-    let color = in.color;
-    return vec4<f32>(color.xyz, 1.0);
+
+    let color = in.color.rgb;
+    return vec4<f32>(color, 1.0);
 }
